@@ -1,22 +1,15 @@
 # .github/workflows/build-win64.yml
-name: Build win64 legacy NVENC
+name: Build win64 legacy NVENC baseline
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-    paths:
-      - '.github/workflows/build-win64.yml'
-      - 'scripts/build-win64.sh'
-      - 'config/project.env'
 
 permissions:
   contents: read
 
 concurrency:
-  group: ffmpeg-win64-build
-  cancel-in-progress: false
+  group: ffmpeg-win64-baseline
+  cancel-in-progress: true
 
 jobs:
   baseline:
@@ -71,10 +64,8 @@ jobs:
           NV_CODEC_HEADERS_TAG: n13.0.19.1
           BTBN_BUILD_COMMIT: a1b5c414d3c53f5abf5baf73df9607cdf77bb46a
         run: |
-          set -o pipefail
           /usr/bin/time -v -o metrics/time-8.1.2.txt \
-            bash scripts/build-win64.sh 8.1.2 8.1 \
-            2>&1 | tee metrics/build-8.1.2.log
+            bash scripts/build-win64.sh 8.1.2 8.1
 
       - name: Record runner resources after build
         if: always()
@@ -126,7 +117,10 @@ jobs:
           path: |
             out/ffmpeg-8.1.2-win64-gpl-nvenc13.0.zip
             out/ffmpeg-8.1.2-win64-gpl-nvenc13.0.zip.sha256
-            metrics/
+            metrics/resources-before-cleanup.txt
+            metrics/resources-after-cleanup.txt
+            metrics/resources-after-build.txt
+            metrics/time-8.1.2.txt
           compression-level: 0
           retention-days: 14
           if-no-files-found: error
