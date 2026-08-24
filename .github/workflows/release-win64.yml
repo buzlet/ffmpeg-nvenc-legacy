@@ -5,6 +5,11 @@ on:
   workflow_dispatch:
   schedule:
     - cron: '17 5 * * *'
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/release-win64.yml'
 
 permissions:
   contents: write
@@ -51,6 +56,9 @@ jobs:
             echo 'No eligible FFmpeg versions found.'
             exit 0
           fi
+
+          printf 'Eligible official versions:\n'
+          printf '  %s\n' "${versions[@]}"
 
           built=0
           skipped=0
@@ -99,9 +107,8 @@ jobs:
 
             ((built+=1))
 
-            # Sources and objects are version-specific; remove them before the
-            # next version. Keep Docker images so adjacent point releases can
-            # reuse the same dependency environment.
+            # Sources and objects are version-specific. Keep Docker images so
+            # adjacent point releases reuse the same dependency environment.
             rm -rf ".work-${version}" out
             mkdir -p out
             df -h /
