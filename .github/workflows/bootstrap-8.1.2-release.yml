@@ -1,0 +1,70 @@
+# .github/workflows/bootstrap-8.1.2-release.yml
+name: Bootstrap FFmpeg 8.1.2 release
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/bootstrap-8.1.2-release.yml'
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download validated baseline artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh run download 32787266595 \
+            --repo "$GITHUB_REPOSITORY" \
+            --name ffmpeg-8.1.2-win64-gpl-nvenc13.0 \
+            --dir bootstrap
+
+          ZIP="$(find bootstrap -type f -name 'ffmpeg-8.1.2-win64-gpl-nvenc13.0.zip' -print -quit)"
+          SHA="$(find bootstrap -type f -name 'ffmpeg-8.1.2-win64-gpl-nvenc13.0.zip.sha256' -print -quit)"
+          test -n "$ZIP"
+          test -n "$SHA"
+          cp "$ZIP" ./ffmpeg-8.1.2-win64-gpl-nvenc13.0.zip
+          cp "$SHA" ./ffmpeg-8.1.2-win64-gpl-nvenc13.0.zip.sha256
+          sed -i 's#  .*ffmpeg-8.1.2-win64-gpl-nvenc13.0.zip#  ffmpeg-8.1.2-win64-gpl-nvenc13.0.zip#' \
+            ffmpeg-8.1.2-win64-gpl-nvenc13.0.zip.sha256
+          sha256sum -c ffmpeg-8.1.2-win64-gpl-nvenc13.0.zip.sha256
+
+      - name: Publish immutable release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG='v8.1.2-nv13.0-r1'
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "$TAG already exists; leaving it unchanged."
+            exit 0
+          fi
+
+          cat > notes.md <<'EOF'
+          Windows x86_64 static GPL build of official FFmpeg **n8.1.2** for NVIDIA systems that must remain on legacy driver branches.
+
+          - FFmpeg upstream tag: `n8.1.2`
+          - nv-codec-headers: `n13.0.19.1`
+          - NVENC API: **13.0**
+          - Target: Windows x86_64
+          - Variant: GPL static
+          - Project revision: r1
+
+          Exact upstream commits and the BtbN container digest are recorded in `BUILD-INFO.txt` inside the ZIP.
+          EOF
+
+          gh release create "$TAG" \
+            ffmpeg-8.1.2-win64-gpl-nvenc13.0.zip \
+            ffmpeg-8.1.2-win64-gpl-nvenc13.0.zip.sha256 \
+            --repo "$GITHUB_REPOSITORY" \
+            --title 'FFmpeg 8.1.2 legacy NVENC 13.0 r1' \
+            --notes-file notes.md
