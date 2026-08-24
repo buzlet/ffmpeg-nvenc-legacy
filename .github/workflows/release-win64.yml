@@ -1,0 +1,117 @@
+# .github/workflows/release-win64.yml
+name: Publish win64 legacy NVENC releases
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 5 * * *'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ffmpeg-win64-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build and publish missing releases
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    env:
+      GH_TOKEN: ${{ github.token }}
+      NV_CODEC_HEADERS_TAG: n13.0.19.1
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Reclaim hosted-runner disk space
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo rm -rf /usr/local/lib/android || true
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf /opt/ghc || true
+          sudo rm -rf /usr/local/share/boost || true
+          if [[ -n "${AGENT_TOOLSDIRECTORY:-}" ]]; then
+            sudo rm -rf "$AGENT_TOOLSDIRECTORY" || true
+          fi
+          docker system prune -af || true
+          df -h /
+
+      - name: Build and publish every missing official version
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-logs
+
+          mapfile -t versions < <(bash scripts/list-ffmpeg-versions.sh config/project.env)
+          if (( ${#versions[@]} == 0 )); then
+            echo 'No eligible FFmpeg versions found.'
+            exit 0
+          fi
+
+          built=0
+          skipped=0
+
+          for version in "${versions[@]}"; do
+            release_tag="v${version}-nv13.0-r1"
+            asset="ffmpeg-${version}-win64-gpl-nvenc13.0.zip"
+
+            if gh release view "$release_tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              echo "Already published: $release_tag"
+              ((skipped+=1))
+              continue
+            fi
+
+            echo "Building missing release: $release_tag"
+            rm -rf out ".work-${version}"
+            mkdir -p out
+
+            /usr/bin/time -v -o "release-logs/time-${version}.txt" \
+              bash scripts/build-win64.sh "$version" auto \
+              2>&1 | tee "release-logs/build-${version}.log"
+
+            test -s "out/$asset"
+            test -s "out/$asset.sha256"
+            (cd out && sha256sum -c "$asset.sha256")
+
+            cat > "release-logs/notes-${version}.md" <<EOF
+          Windows x86_64 static GPL build of official FFmpeg **n${version}** for NVIDIA systems that must remain on legacy driver branches.
+
+          - FFmpeg upstream tag: \`n${version}\`
+          - nv-codec-headers: \`n13.0.19.1\`
+          - NVENC API: **13.0**
+          - Target: Windows x86_64
+          - Variant: GPL static
+          - Project revision: r1
+
+          Exact upstream commits and the BtbN container digest are recorded inside \`BUILD-INFO.txt\` in the ZIP.
+          EOF
+
+            gh release create "$release_tag" \
+              "out/$asset" \
+              "out/$asset.sha256" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "FFmpeg ${version} legacy NVENC 13.0 r1" \
+              --notes-file "release-logs/notes-${version}.md"
+
+            ((built+=1))
+
+            # Sources and objects are version-specific; remove them before the
+            # next version. Keep Docker images so adjacent point releases can
+            # reuse the same dependency environment.
+            rm -rf ".work-${version}" out
+            mkdir -p out
+            df -h /
+          done
+
+          {
+            echo '## Legacy release scan'
+            echo
+            echo "- Eligible versions: ${#versions[@]}"
+            echo "- New releases built: $built"
+            echo "- Existing releases skipped: $skipped"
+            echo '- nv-codec-headers: `n13.0.19.1`'
+          } >> "$GITHUB_STEP_SUMMARY"
