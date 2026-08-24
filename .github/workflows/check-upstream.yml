@@ -1,0 +1,105 @@
+# .github/workflows/check-upstream.yml
+name: Check FFmpeg upstream
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '37 4 * * *'
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/check-upstream.yml'
+      - 'config/project.env'
+      - 'scripts/detect-ffmpeg-version.sh'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ffmpeg-upstream-check
+  cancel-in-progress: true
+
+jobs:
+  detect:
+    name: Detect eligible FFmpeg release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate detector policy with synthetic tags
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+
+          git init --bare "$tmp/upstream.git"
+          git init "$tmp/work"
+          git -C "$tmp/work" config user.name 'CI Test'
+          git -C "$tmp/work" config user.email 'ci-test@example.invalid'
+          printf 'test\n' > "$tmp/work/file"
+          git -C "$tmp/work" add file
+          git -C "$tmp/work" commit -m test
+
+          for tag in \
+            n9.0.1 \
+            n10.0 \
+            n10.0.2 \
+            n11.0.3 \
+            n11.0.4-rc1 \
+            snapshot-20260825 \
+            autobuild-2026-08-25; do
+            git -C "$tmp/work" tag "$tag"
+          done
+
+          git -C "$tmp/work" remote add origin "$tmp/upstream.git"
+          git -C "$tmp/work" push origin --tags
+
+          cat > "$tmp/test.env" <<EOF
+          FFMPEG_UPSTREAM_URL=$tmp/upstream.git
+          FFMPEG_MIN_MAJOR=10
+          NV_CODEC_HEADERS_TAG=n13.0.19.1
+          ACTIVE_TARGETS=win64
+          EOF
+
+          result="$(bash scripts/detect-ffmpeg-version.sh "$tmp/test.env")"
+          printf '%s\n' "$result"
+
+          grep -qx 'found=true' <<< "$result"
+          grep -qx 'tag=n11.0.3' <<< "$result"
+          grep -qx 'version=11.0.3' <<< "$result"
+          grep -Eq '^commit=[0-9a-f]{40}$' <<< "$result"
+
+      - name: Detect latest eligible upstream version
+        id: upstream
+        shell: bash
+        run: bash scripts/detect-ffmpeg-version.sh config/project.env
+
+      - name: Write job summary
+        shell: bash
+        env:
+          FOUND: ${{ steps.upstream.outputs.found }}
+          TAG: ${{ steps.upstream.outputs.tag }}
+          VERSION: ${{ steps.upstream.outputs.version }}
+          COMMIT: ${{ steps.upstream.outputs.commit }}
+        run: |
+          {
+            echo '## FFmpeg upstream check'
+            echo
+            echo '- Policy: strict `nX.Y` / `nX.Y.Z`, with `X >= 10`'
+            echo '- Date/nightly/snapshot/RC tags: ignored'
+            echo '- Pinned nv-codec-headers: `n13.0.19.1`'
+            echo '- Active target: `win64`'
+            echo
+            if [[ "$FOUND" == 'true' ]]; then
+              echo "- Latest eligible tag: \`$TAG\`"
+              echo "- Version: \`$VERSION\`"
+              echo "- Upstream commit: \`$COMMIT\`"
+            else
+              echo '- Latest eligible tag: none'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
