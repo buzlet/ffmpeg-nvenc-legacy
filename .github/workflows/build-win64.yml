@@ -1,0 +1,132 @@
+# .github/workflows/build-win64.yml
+name: Build win64 legacy NVENC
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/build-win64.yml'
+      - 'scripts/build-win64.sh'
+      - 'config/project.env'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ffmpeg-win64-build
+  cancel-in-progress: false
+
+jobs:
+  baseline:
+    name: Baseline FFmpeg 8.1.2
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Record runner resources before cleanup
+        shell: bash
+        run: |
+          mkdir -p metrics
+          {
+            echo '=== UTC ==='
+            date -u
+            echo '=== CPU ==='
+            nproc
+            lscpu
+            echo '=== Memory ==='
+            free -h
+            echo '=== Filesystems ==='
+            df -h
+            echo '=== Docker ==='
+            docker system df || true
+          } | tee metrics/resources-before-cleanup.txt
+
+      - name: Reclaim hosted-runner disk space
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo rm -rf /usr/local/lib/android || true
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf /opt/ghc || true
+          sudo rm -rf /usr/local/share/boost || true
+          if [[ -n "${AGENT_TOOLSDIRECTORY:-}" ]]; then
+            sudo rm -rf "$AGENT_TOOLSDIRECTORY" || true
+          fi
+          docker system prune -af || true
+          {
+            echo '=== Filesystems after cleanup ==='
+            df -h
+            echo '=== Docker after cleanup ==='
+            docker system df || true
+          } | tee metrics/resources-after-cleanup.txt
+
+      - name: Build exact FFmpeg n8.1.2 with nv-codec-headers n13.0.19.1
+        shell: bash
+        env:
+          NV_CODEC_HEADERS_TAG: n13.0.19.1
+          BTBN_BUILD_COMMIT: a1b5c414d3c53f5abf5baf73df9607cdf77bb46a
+        run: |
+          set -o pipefail
+          /usr/bin/time -v -o metrics/time-8.1.2.txt \
+            bash scripts/build-win64.sh 8.1.2 8.1 \
+            2>&1 | tee metrics/build-8.1.2.log
+
+      - name: Record runner resources after build
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '=== UTC ==='
+            date -u
+            echo '=== Memory ==='
+            free -h
+            echo '=== Filesystems ==='
+            df -h
+            echo '=== Docker ==='
+            docker system df || true
+            echo '=== Output ==='
+            ls -lh out 2>/dev/null || true
+          } | tee metrics/resources-after-build.txt
+
+      - name: Build summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '## win64 baseline build'
+            echo
+            echo '- FFmpeg: `n8.1.2`'
+            echo '- nv-codec-headers: `n13.0.19.1`'
+            echo '- NVENC API target: `13.0`'
+            echo '- Target: `Windows x86_64`, GPL static'
+            echo
+            if [[ -f out/ffmpeg-8.1.2-win64-gpl-nvenc13.0.zip.sha256 ]]; then
+              echo '### Artifact SHA256'
+              echo '```text'
+              cat out/ffmpeg-8.1.2-win64-gpl-nvenc13.0.zip.sha256
+              echo '```'
+            fi
+            echo
+            echo '### Disk after build'
+            echo '```text'
+            df -h /
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload baseline artifact
+        if: success()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ffmpeg-8.1.2-win64-gpl-nvenc13.0
+          path: |
+            out/ffmpeg-8.1.2-win64-gpl-nvenc13.0.zip
+            out/ffmpeg-8.1.2-win64-gpl-nvenc13.0.zip.sha256
+            metrics/
+          compression-level: 0
+          retention-days: 14
+          if-no-files-found: error
