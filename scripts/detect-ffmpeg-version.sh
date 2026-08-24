@@ -13,12 +13,30 @@ fi
 source "$CONFIG_FILE"
 
 : "${FFMPEG_UPSTREAM_URL:?FFMPEG_UPSTREAM_URL is required}"
-: "${FFMPEG_MIN_MAJOR:?FFMPEG_MIN_MAJOR is required}"
+: "${FFMPEG_MIN_VERSION:?FFMPEG_MIN_VERSION is required}"
 
-if ! [[ "$FFMPEG_MIN_MAJOR" =~ ^[0-9]+$ ]]; then
-    echo "FFMPEG_MIN_MAJOR must be an integer" >&2
+if ! [[ "$FFMPEG_MIN_VERSION" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
+    echo "FFMPEG_MIN_VERSION must match X.Y or X.Y.Z" >&2
     exit 2
 fi
+
+version_ge() {
+    local lhs="$1"
+    local rhs="$2"
+    local l_major l_minor l_patch r_major r_minor r_patch
+
+    IFS='.' read -r l_major l_minor l_patch <<< "$lhs"
+    IFS='.' read -r r_major r_minor r_patch <<< "$rhs"
+    l_patch="${l_patch:-0}"
+    r_patch="${r_patch:-0}"
+
+    if (( l_major > r_major )); then return 0; fi
+    if (( l_major < r_major )); then return 1; fi
+    if (( l_minor > r_minor )); then return 0; fi
+    if (( l_minor < r_minor )); then return 1; fi
+    if (( l_patch >= r_patch )); then return 0; fi
+    return 1
+}
 
 emit_output() {
     local key="$1"
@@ -29,14 +47,21 @@ emit_output() {
     fi
 }
 
-mapfile -t eligible_tags < <(
+mapfile -t candidate_tags < <(
     git ls-remote --tags --refs "$FFMPEG_UPSTREAM_URL" 'refs/tags/n*' \
         | awk '{print $2}' \
         | sed 's#^refs/tags/##' \
         | grep -E '^n[0-9]+\.[0-9]+(\.[0-9]+)?$' \
-        | awk -F'[n.]' -v min_major="$FFMPEG_MIN_MAJOR" '$2 >= min_major' \
         | sort -Vu
 )
+
+eligible_tags=()
+for tag in "${candidate_tags[@]}"; do
+    version="${tag#n}"
+    if version_ge "$version" "$FFMPEG_MIN_VERSION"; then
+        eligible_tags+=("$tag")
+    fi
+done
 
 if (( ${#eligible_tags[@]} == 0 )); then
     emit_output found false

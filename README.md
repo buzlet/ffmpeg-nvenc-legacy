@@ -11,11 +11,11 @@ nX.Y
 nX.Y.Z
 ```
 
-are eligible, and only when `X > 9`.
+are eligible, starting with `n8.1.2` inclusive.
 
-Examples accepted: `n10.0`, `n10.0.1`, `n11.2`.
+Examples accepted: `n8.1.2`, `n8.2`, `n9.0.1`, `n10.0`, `n10.0.1`.
 
-Examples ignored: `n9.0.1`, snapshots, nightly/date builds, release candidates, development commits, and descriptive tags.
+Examples ignored: `n8.1.1` and older versions, snapshots, nightly/date builds, release candidates, development commits, and descriptive tags.
 
 The current NVIDIA compatibility baseline is pinned independently from FFmpeg:
 
