@@ -5,11 +5,6 @@ on:
   workflow_dispatch:
   schedule:
     - cron: '17 5 * * *'
-  push:
-    branches:
-      - main
-    paths:
-      - '.github/workflows/release-win64.yml'
 
 permissions:
   contents: write
