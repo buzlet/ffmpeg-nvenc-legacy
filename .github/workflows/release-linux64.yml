@@ -5,13 +5,6 @@ on:
   workflow_dispatch:
   schedule:
     - cron: '47 5 * * *'
-  # Bootstrap only: creating this workflow performs one real baseline run.
-  # This push trigger will be removed after the first successful validation.
-  push:
-    branches:
-      - main
-    paths:
-      - '.github/workflows/release-linux64.yml'
 
 permissions:
   contents: write
@@ -32,20 +25,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
-
-      - name: Reclaim hosted-runner disk space
-        shell: bash
-        run: |
-          set -euxo pipefail
-          sudo rm -rf /usr/local/lib/android || true
-          sudo rm -rf /usr/share/dotnet || true
-          sudo rm -rf /opt/ghc || true
-          sudo rm -rf /usr/local/share/boost || true
-          if [[ -n "${AGENT_TOOLSDIRECTORY:-}" ]]; then
-            sudo rm -rf "$AGENT_TOOLSDIRECTORY" || true
-          fi
-          docker system prune -af || true
-          df -h /
 
       - name: Select next release missing Linux asset
         id: next
@@ -79,6 +58,21 @@ jobs:
 
           echo 'No existing Windows release is missing a Linux asset.'
           echo 'found=false' >> "$GITHUB_OUTPUT"
+
+      - name: Reclaim hosted-runner disk space
+        if: steps.next.outputs.found == 'true'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo rm -rf /usr/local/lib/android || true
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf /opt/ghc || true
+          sudo rm -rf /usr/local/share/boost || true
+          if [[ -n "${AGENT_TOOLSDIRECTORY:-}" ]]; then
+            sudo rm -rf "$AGENT_TOOLSDIRECTORY" || true
+          fi
+          docker system prune -af || true
+          df -h /
 
       - name: Build next missing Linux asset
         if: steps.next.outputs.found == 'true'
