@@ -56,7 +56,17 @@ set -euo pipefail
 : "${BTBN_IMAGE_DIGEST:?}"
 : "${BTBN_IMAGE_ID:?}"
 : "${BTBN_BUILD_COMMIT:?}"
+: "${HOST_UID:?}"
+: "${HOST_GID:?}"
 : "${FFBUILD_PREFIX:?BtbN image does not define FFBUILD_PREFIX}"
+
+# The BtbN image runs as root because its baked-in FFBUILD_PREFIX is root-owned.
+# Always return ownership of bind-mounted files to the GitHub runner, even if
+# configure/make/package fails halfway through.
+restore_host_ownership() {
+    chown -R "$HOST_UID:$HOST_GID" /work 2>/dev/null || true
+}
+trap restore_host_ownership EXIT
 
 cd /work
 rm -rf ffmpeg nv-codec-headers prefix package out
@@ -168,18 +178,15 @@ ZIP_NAME="ffmpeg-${FFMPEG_VERSION}-win64-gpl-nvenc13.0.zip"
 CONTAINER_SCRIPT
 chmod +x "$WORK_DIR/container-build.sh"
 
-# Run the container as the current runner UID/GID. This prevents bind-mounted
-# build/output files from becoming root-owned and eliminates cleanup failures
-# on subsequent steps or runs.
 docker run --rm -i \
-    --user "$HOST_UID:$HOST_GID" \
-    -e HOME=/tmp \
     -e FFMPEG_VERSION="$VERSION" \
     -e NV_CODEC_HEADERS_TAG="$NV_CODEC_HEADERS_TAG" \
     -e BTBN_IMAGE_REF="$IMAGE" \
     -e BTBN_IMAGE_DIGEST="$IMAGE_DIGEST" \
     -e BTBN_IMAGE_ID="$IMAGE_ID" \
     -e BTBN_BUILD_COMMIT="$BTBN_BUILD_COMMIT" \
+    -e HOST_UID="$HOST_UID" \
+    -e HOST_GID="$HOST_GID" \
     -v "$WORK_DIR:/work" \
     "$IMAGE" bash /work/container-build.sh
 
