@@ -45,28 +45,24 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
           mapfile -t versions < <(bash scripts/list-ffmpeg-versions.sh config/project.env)
           if (( ${#versions[@]} == 0 )); then
             echo 'No eligible FFmpeg versions found.'
             echo 'found=false' >> "$GITHUB_OUTPUT"
             exit 0
           fi
-
           for version in "${versions[@]}"; do
             release_tag="v${version}-nv13.0-r1"
             if gh release view "$release_tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
               echo "Already published: $release_tag"
               continue
             fi
-
             echo "Next missing release: $release_tag"
             echo 'found=true' >> "$GITHUB_OUTPUT"
             echo "version=$version" >> "$GITHUB_OUTPUT"
             echo "release_tag=$release_tag" >> "$GITHUB_OUTPUT"
             exit 0
           done
-
           echo 'All eligible FFmpeg versions are already published.'
           echo 'found=false' >> "$GITHUB_OUTPUT"
 
@@ -78,11 +74,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p release-logs out
-
           /usr/bin/time -v -o "release-logs/time-${VERSION}.txt" \
             bash scripts/build-win64.sh "$VERSION" auto \
             2>&1 | tee "release-logs/build-${VERSION}.log"
-
           asset="ffmpeg-${VERSION}-win64-gpl-nvenc13.0.zip"
           test -s "out/$asset"
           test -s "out/$asset.sha256"
@@ -97,7 +91,6 @@ jobs:
         run: |
           set -euo pipefail
           asset="ffmpeg-${VERSION}-win64-gpl-nvenc13.0.zip"
-
           cat > "release-logs/notes-${VERSION}.md" <<EOF
           Windows x86_64 static GPL build of official FFmpeg **n${VERSION}** for NVIDIA systems that must remain on legacy driver branches.
 
@@ -110,7 +103,6 @@ jobs:
 
           Exact upstream commits and the BtbN container digest are recorded inside \`BUILD-INFO.txt\` in the ZIP.
           EOF
-
           gh release create "$RELEASE_TAG" \
             "out/$asset" \
             "out/$asset.sha256" \
