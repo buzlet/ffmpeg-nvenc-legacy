@@ -1,0 +1,129 @@
+# .github/workflows/release-linux64.yml
+name: Publish next linux64 legacy NVENC asset
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '47 5 * * *'
+  # Bootstrap only: creating this workflow performs one real baseline run.
+  # This push trigger will be removed after the first successful validation.
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/release-linux64.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ffmpeg-linux64-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build and upload next missing Linux asset
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    env:
+      GH_TOKEN: ${{ github.token }}
+      NV_CODEC_HEADERS_TAG: n13.0.19.1
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Reclaim hosted-runner disk space
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo rm -rf /usr/local/lib/android || true
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf /opt/ghc || true
+          sudo rm -rf /usr/local/share/boost || true
+          if [[ -n "${AGENT_TOOLSDIRECTORY:-}" ]]; then
+            sudo rm -rf "$AGENT_TOOLSDIRECTORY" || true
+          fi
+          docker system prune -af || true
+          df -h /
+
+      - name: Select next release missing Linux asset
+        id: next
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t versions < <(bash scripts/list-ffmpeg-versions.sh config/project.env)
+
+          for version in "${versions[@]}"; do
+            release_tag="v${version}-nv13.0-r1"
+            asset="ffmpeg-${version}-linux64-gpl-nvenc13.0.tar.xz"
+
+            if ! gh release view "$release_tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              echo "Windows release does not exist yet: $release_tag"
+              continue
+            fi
+
+            if gh release view "$release_tag" --repo "$GITHUB_REPOSITORY" \
+                --json assets --jq '.assets[].name' | grep -Fxq "$asset"; then
+              echo "Linux asset already published: $release_tag / $asset"
+              continue
+            fi
+
+            echo "Next Linux asset: $release_tag / $asset"
+            echo 'found=true' >> "$GITHUB_OUTPUT"
+            echo "version=$version" >> "$GITHUB_OUTPUT"
+            echo "release_tag=$release_tag" >> "$GITHUB_OUTPUT"
+            echo "asset=$asset" >> "$GITHUB_OUTPUT"
+            exit 0
+          done
+
+          echo 'No existing Windows release is missing a Linux asset.'
+          echo 'found=false' >> "$GITHUB_OUTPUT"
+
+      - name: Build next missing Linux asset
+        if: steps.next.outputs.found == 'true'
+        shell: bash
+        env:
+          VERSION: ${{ steps.next.outputs.version }}
+          ASSET: ${{ steps.next.outputs.asset }}
+        run: |
+          set -euo pipefail
+          mkdir -p release-logs out
+          /usr/bin/time -v -o "release-logs/time-linux64-${VERSION}.txt" \
+            bash scripts/build-linux64.sh "$VERSION" auto \
+            2>&1 | tee "release-logs/build-linux64-${VERSION}.log"
+          test -s "out/$ASSET"
+          test -s "out/$ASSET.sha256"
+          (cd out && sha256sum -c "$ASSET.sha256")
+
+      - name: Upload Linux asset to existing release
+        if: steps.next.outputs.found == 'true'
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ steps.next.outputs.release_tag }}
+          ASSET: ${{ steps.next.outputs.asset }}
+        run: |
+          set -euo pipefail
+          gh release upload "$RELEASE_TAG" \
+            "out/$ASSET" \
+            "out/$ASSET.sha256" \
+            --repo "$GITHUB_REPOSITORY"
+
+      - name: Summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '## Linux x86_64 legacy release scan'
+            echo
+            if [[ "${{ steps.next.outputs.found }}" == 'true' ]]; then
+              echo '- Selected version: `${{ steps.next.outputs.version }}`'
+              echo '- Release tag: `${{ steps.next.outputs.release_tag }}`'
+              echo '- Asset: `${{ steps.next.outputs.asset }}`'
+              echo '- Exactly one FFmpeg version was processed in this run.'
+            else
+              echo '- No published Windows release is missing a Linux asset.'
+            fi
+            echo '- nv-codec-headers: `n13.0.19.1`'
+            echo '- NVENC API: `13.0`'
+          } >> "$GITHUB_STEP_SUMMARY"
