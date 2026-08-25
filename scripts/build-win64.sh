@@ -43,6 +43,9 @@ IMAGE_ID="$(docker image inspect "$IMAGE" --format '{{.Id}}')"
 printf 'Image digest: %s\n' "$IMAGE_DIGEST"
 printf 'Image id: %s\n' "$IMAGE_ID"
 
+HOST_UID="$(id -u)"
+HOST_GID="$(id -g)"
+
 cat > "$WORK_DIR/container-build.sh" <<'CONTAINER_SCRIPT'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -53,12 +56,10 @@ set -euo pipefail
 : "${BTBN_IMAGE_DIGEST:?}"
 : "${BTBN_IMAGE_ID:?}"
 : "${BTBN_BUILD_COMMIT:?}"
-: "${HOST_UID:?}"
-: "${HOST_GID:?}"
 : "${FFBUILD_PREFIX:?BtbN image does not define FFBUILD_PREFIX}"
 
 cd /work
-rm -rf ffmpeg nv-codec-headers prefix package
+rm -rf ffmpeg nv-codec-headers prefix package out
 mkdir -p prefix package out
 
 # Never trust the ffnvcodec version baked into the upstream image. Replace it
@@ -164,23 +165,21 @@ ZIP_NAME="ffmpeg-${FFMPEG_VERSION}-win64-gpl-nvenc13.0.zip"
     cd /work/out
     sha256sum "$ZIP_NAME" > "${ZIP_NAME}.sha256"
 )
-
-chown -R "$HOST_UID:$HOST_GID" /work/out /work/package /work/prefix
 CONTAINER_SCRIPT
 chmod +x "$WORK_DIR/container-build.sh"
 
-HOST_UID="$(id -u)"
-HOST_GID="$(id -g)"
-
+# Run the container as the current runner UID/GID. This prevents bind-mounted
+# build/output files from becoming root-owned and eliminates cleanup failures
+# on subsequent steps or runs.
 docker run --rm -i \
+    --user "$HOST_UID:$HOST_GID" \
+    -e HOME=/tmp \
     -e FFMPEG_VERSION="$VERSION" \
     -e NV_CODEC_HEADERS_TAG="$NV_CODEC_HEADERS_TAG" \
     -e BTBN_IMAGE_REF="$IMAGE" \
     -e BTBN_IMAGE_DIGEST="$IMAGE_DIGEST" \
     -e BTBN_IMAGE_ID="$IMAGE_ID" \
     -e BTBN_BUILD_COMMIT="$BTBN_BUILD_COMMIT" \
-    -e HOST_UID="$HOST_UID" \
-    -e HOST_GID="$HOST_GID" \
     -v "$WORK_DIR:/work" \
     "$IMAGE" bash /work/container-build.sh
 
