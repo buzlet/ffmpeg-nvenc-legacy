@@ -26,20 +26,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      - name: Reclaim hosted-runner disk space
-        shell: bash
-        run: |
-          set -euxo pipefail
-          sudo rm -rf /usr/local/lib/android || true
-          sudo rm -rf /usr/share/dotnet || true
-          sudo rm -rf /opt/ghc || true
-          sudo rm -rf /usr/local/share/boost || true
-          if [[ -n "${AGENT_TOOLSDIRECTORY:-}" ]]; then
-            sudo rm -rf "$AGENT_TOOLSDIRECTORY" || true
-          fi
-          docker system prune -af || true
-          df -h /
-
       - name: Select next missing official version
         id: next
         shell: bash
@@ -65,6 +51,21 @@ jobs:
           done
           echo 'All eligible FFmpeg versions are already published.'
           echo 'found=false' >> "$GITHUB_OUTPUT"
+
+      - name: Reclaim hosted-runner disk space
+        if: steps.next.outputs.found == 'true'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo rm -rf /usr/local/lib/android || true
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf /opt/ghc || true
+          sudo rm -rf /usr/local/share/boost || true
+          if [[ -n "${AGENT_TOOLSDIRECTORY:-}" ]]; then
+            sudo rm -rf "$AGENT_TOOLSDIRECTORY" || true
+          fi
+          docker system prune -af || true
+          df -h /
 
       - name: Build next missing release
         if: steps.next.outputs.found == 'true'
